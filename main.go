@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 
 	"github.com/docker/docker/api/types/container"
@@ -12,7 +14,34 @@ import (
 	"github.com/docker/go-connections/nat"
 )
 
+type StartRequest struct {
+	ServerName string `json:"server_name"`
+}
+
 func main() {
+	http.HandleFunc("/containers/start", handleStartServer)
+
+	if err:= http.ListenAndServe(":8081", nil); err!= nil {
+		fmt.Printf("Agent failed to start: %v\n", err)
+	}
+}
+
+func handleStartServer(w http.ResponseWriter, r *http.Request) {
+	// Restrict this endpoint to HTTP POST requests only
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST requests are allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	// Parse the incoming JSON payload from the request body
+	var req StartRequest
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil || req.ServerName == "" {
+		http.Error(w, "Invalid JSON body. 'server_name' is required.", http.StatusBadRequest)
+		return
+	}
+
+	fmt.Printf("Received instruction to spin up server: %s\n", req.ServerName)
+
 	// Context handles timeouts and cancellation signals in Go
 	ctx := context.Background()
 
@@ -39,10 +68,6 @@ func main() {
 
 	// Stream the pull progress directly to your terminal window
 	io.Copy(os.Stdout, out)
-	fmt.Println("\nMinecraft image pulled successfully!")
-
-	// 3. Configure the container specifications
-	fmt.Println("Configured Minecraft Environment settings...")
 
 	// Define the container environment variables and internal settings
 	config := &container.Config{
@@ -74,21 +99,25 @@ func main() {
 	}
 
 	// 4. Create the container instance
-	resp, err := cli.ContainerCreate(ctx, config, hostConfig, nil, nil, "my-go-minecraft-server")
+	resp, err := cli.ContainerCreate(ctx, config, hostConfig, nil, nil, req.ServerName)
 	if err != nil {
 		fmt.Printf("Failed to create container: %v\n", err)
 		return
 	}
 
 	// 5. Start the container executing
-	fmt.Printf("Launching Minecraft Server Container ID: %s\n", resp.ID)
 	err = cli.ContainerStart(ctx, resp.ID, container.StartOptions{})
 	if err != nil {
-		fmt.Printf("Failed to start container: %v\n", err)
+		http.Error(w, fmt.Sprintf("Failed to start container: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	fmt.Println("\nSuccess! Your containerized Minecraft server is booting up.")
-	fmt.Println("To view the active server startup logs, run: docker logs -f my-go-minecraft-server")
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":       "created",
+		"container_id": resp.ID,
+		"server_name":  req.ServerName,
+	})
 
 }
