@@ -18,6 +18,7 @@ type StartRequest struct {
 func main() {
 	http.HandleFunc("/containers/start", handleStartServer)
 
+	fmt.Println("Agent listening on port :8081...")
 	if err:= http.ListenAndServe(":8081", nil); err!= nil {
 		fmt.Printf("Agent failed to start: %v\n", err)
 	}
@@ -56,6 +57,12 @@ func handleStartServer(w http.ResponseWriter, r *http.Request) {
 	// 2. Set up the configs
 
 	config, hostConfig, err := configSetup(req.GameName, cli, ctx)
+
+	if err != nil {
+		fmt.Printf("Failed to setup container config: %v\n", err)
+		http.Error(w, fmt.Sprintf("Configuration error: %v", err), http.StatusBadRequest)
+		return
+	}
 //
 	// 3. Create the container instance
 	resp, err := cli.ContainerCreate(ctx, config, hostConfig, nil, nil, req.ServerName)

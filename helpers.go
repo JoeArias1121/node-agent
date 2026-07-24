@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"os"
 
 	"github.com/docker/docker/api/types/container"
@@ -14,7 +15,7 @@ import (
 
 // assuming by this point name and game are all good
 func configSetup(game string, cli *client.Client, ctx context.Context) (*container.Config, *container.HostConfig, error) {
-	if game == "minecraft" {
+	if game == "Minecraft" {
 		return minecraftConfig(cli, ctx)
 	}
 
@@ -63,4 +64,18 @@ func minecraftConfig(cli *client.Client, ctx context.Context) (*container.Config
 	}
 
 	return config, hostConfig, nil
+}
+
+// getFreePort asks the OS to allocate a random open port, grabs the number, and releases it
+func getFreePort() (int, error) {
+    // Binding to ":0" forces the OS to pick an unallocated ephemeral port automatically
+    listener, err := net.Listen("tcp", ":0")
+    if err != nil {
+        return 0, err
+    }
+    defer listener.Close()
+
+    // Extract the port number that the OS assigned to us
+    localAddr := listener.Addr().(*net.TCPAddr)
+    return localAddr.Port, nil
 }
