@@ -15,8 +15,13 @@ type StartRequest struct {
 	GameName string `json:"game_name"`
 }
 
+type StopRequest struct {
+	ContainerID string `json:"container_id"`
+}
+
 func main() {
 	http.HandleFunc("/containers/start", handleStartServer)
+	http.HandleFunc("/containers/stop", handleStopServer)
 
 	fmt.Println("Agent listening on port :8081...")
 	if err:= http.ListenAndServe(":8081", nil); err!= nil {
@@ -86,4 +91,42 @@ func handleStartServer(w http.ResponseWriter, r *http.Request) {
 		"server_name":  req.ServerName,
 	})
 
+}
+
+func handleStopServer(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST requests are allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req StopRequest
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil || req.ContainerID == "" {
+		fmt.Printf("Invalid JSON body %v\n", err)
+		http.Error(w, "Invalid JSON body. 'container_id' is required", http.StatusBadRequest)
+		return
+	}
+
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		fmt.Printf("Failed to connect to Docker daemon: %v\n", err)
+		http.Error(w, fmt.Sprintf("Failed to connect to Docker daemon: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer cli.Close()
+
+	ctx := context.Background()
+	err = cli.ContainerStop(ctx, req.ContainerID, container.StopOptions{})
+	if err != nil {
+		fmt.Printf("Failed to stop container: %v\n", err)
+		http.Error(w, fmt.Sprintf("Failed to stop container: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":       "stopped",
+		"container_id": req.ContainerID,
+	})
 }
