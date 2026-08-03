@@ -53,6 +53,7 @@ func handleStartServer(w http.ResponseWriter, r *http.Request) {
 	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		fmt.Printf("Failed to connect to Docker daemon: %v\n", err)
+		http.Error(w, fmt.Sprintf("Failed to connect to Docker daemon: %v", err), http.StatusInternalServerError)
 		return
 	}
 	defer cli.Close()
@@ -73,6 +74,7 @@ func handleStartServer(w http.ResponseWriter, r *http.Request) {
 	resp, err := cli.ContainerCreate(ctx, config, hostConfig, nil, nil, req.ServerName)
 	if err != nil {
 		fmt.Printf("Failed to create container: %v\n", err)
+		http.Error(w, fmt.Sprintf("Failed to create container: %v", err), http.StatusInternalServerError)
 		return
 	}
 
