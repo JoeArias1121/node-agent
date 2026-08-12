@@ -14,25 +14,31 @@ import (
 )
 
 // assuming by this point name and game are all good
-func configSetup(game string, cli *client.Client, ctx context.Context) (*container.Config, *container.HostConfig, error) {
+func configSetup(game string, cli *client.Client, ctx context.Context, memoryGB int64, cpus float64) (*container.Config, *container.HostConfig, int, error) {
 	if game == "Minecraft" {
-		return minecraftConfig(cli, ctx)
+		return minecraftConfig(cli, ctx, memoryGB, cpus)
 	}
 
-	return nil, nil, fmt.Errorf("Error with config setup")
+	return nil, nil, 0, fmt.Errorf("Error with config setup")
 }
 
-func minecraftConfig(cli *client.Client, ctx context.Context) (*container.Config, *container.HostConfig, error) {
+func minecraftConfig(cli *client.Client, ctx context.Context, memoryGB int64, cpus float64) (*container.Config, *container.HostConfig, int, error) {
 	imageName := "docker.io/itzg/minecraft-server:latest"
 	fmt.Printf("Pulling Minecraft image: %s (This may take a minute...)\n", imageName)
 	out, err := cli.ImagePull(ctx, imageName, image.PullOptions{})
 	if err != nil {
-		return nil, nil, fmt.Errorf("Failed to pull image: %v\n", err)
+		return nil, nil, 0, fmt.Errorf("Failed to pull image: %v\n", err)
 	}
 	defer out.Close()
 
 	// Stream the pull progress directly to your terminal window
 	io.Copy(os.Stdout, out)
+
+	// Dynamically find a free port on the host
+	port, err := getFreePort()
+	if err != nil {
+		return nil, nil, 0, fmt.Errorf("Failed to allocate dynamic port: %v\n", err)
+	}
 
 	// Define the container environment variables and internal settings
 	config := &container.Config{
@@ -53,20 +59,20 @@ func minecraftConfig(cli *client.Client, ctx context.Context) (*container.Config
 			"25565/tcp": []nat.PortBinding{
 				{
 					HostIP:   "0.0.0.0", // Allow anyone to connect to your host machine IP
-					HostPort: "25565",   // Map it to port 25565 on your laptop/server
+					HostPort: fmt.Sprintf("%d", port),   // Map it to dynamic port on host
 				},
 			},
 		},
 		Resources: container.Resources{
-			Memory:   2 * 1024 * 1024 * 1024, // Sandboxed: Strict 2GB RAM upper limit
-			NanoCPUs: 1000000000,            // Sandboxed: Exactly 1 CPU Core max allocation
+			Memory:   memoryGB * 1024 * 1024 * 1024, // Configurable RAM limit
+			NanoCPUs: int64(cpus * 1000000000),      // Configurable CPU limit
 		},
 	}
 
-	return config, hostConfig, nil
+	return config, hostConfig, port, nil
 }
 
-// getFreePort asks the OS to allocate a random open port, grabs the number, and releases it
+// getFreePort asks the OS to allocate a random open port on the loopback interface, grabs the number, and releases it
 func getFreePort() (int, error) {
     // Binding to ":0" forces the OS to pick an unallocated ephemeral port automatically
     listener, err := net.Listen("tcp", ":0")

@@ -11,8 +11,10 @@ import (
 )
 
 type StartRequest struct {
-	ServerName string `json:"server_name"`
-	GameName string `json:"game_name"`
+	ServerName string  `json:"server_name"`
+	GameName   string  `json:"game_name"`
+	MemoryGB   int64   `json:"memory_gb"` // Optional: RAM limit in GB (e.g. 2)
+	CPUs       float64 `json:"cpus"`      // Optional: CPU allocation in cores (e.g. 1.0)
 }
 
 type StopRequest struct {
@@ -24,7 +26,7 @@ func main() {
 	http.HandleFunc("/containers/stop", handleStopServer)
 
 	fmt.Println("Agent listening on port :8081...")
-	if err:= http.ListenAndServe(":8081", nil); err!= nil {
+	if err := http.ListenAndServe(":8081", nil); err != nil {
 		fmt.Printf("Agent failed to start: %v\n", err)
 	}
 }
@@ -39,11 +41,19 @@ func handleStartServer(w http.ResponseWriter, r *http.Request) {
 	var req StartRequest
 	err := json.NewDecoder(r.Body).Decode(&req)
 	if err != nil || req.ServerName == "" || req.GameName == "" {
-		http.Error(w, "Invalid JSON body. 'server_name' is required.", http.StatusBadRequest)
+		http.Error(w, "Invalid JSON body. 'server_name' and 'game_name' are required.", http.StatusBadRequest)
 		return
 	}
 
-	fmt.Printf("Received instruction to spin up server for: %s\n", req.GameName)
+	// Default to 2GB RAM and 1.0 CPU if not specified
+	if req.MemoryGB <= 0 {
+		req.MemoryGB = 2
+	}
+	if req.CPUs <= 0 {
+		req.CPUs = 1.0
+	}
+
+	fmt.Printf("Received instruction to spin up server for: %s (Size: %d GB RAM, %.1f CPU)\n", req.GameName, req.MemoryGB, req.CPUs)
 	fmt.Printf("It will be called: %s\n", req.ServerName)
 
 	// Context handles timeouts and cancellation signals in Go
@@ -61,15 +71,13 @@ func handleStartServer(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("Successfully connected to local Docker Daemon!")
 
 	// 2. Set up the configs
-
-	config, hostConfig, err := configSetup(req.GameName, cli, ctx)
-
+	config, hostConfig, port, err := configSetup(req.GameName, cli, ctx, req.MemoryGB, req.CPUs)
 	if err != nil {
 		fmt.Printf("Failed to setup container config: %v\n", err)
 		http.Error(w, fmt.Sprintf("Configuration error: %v", err), http.StatusBadRequest)
 		return
 	}
-//
+
 	// 3. Create the container instance
 	resp, err := cli.ContainerCreate(ctx, config, hostConfig, nil, nil, req.ServerName)
 	if err != nil {
@@ -87,12 +95,12 @@ func handleStartServer(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]string{
+	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":       "created",
 		"container_id": resp.ID,
 		"server_name":  req.ServerName,
+		"port":         port,
 	})
-
 }
 
 func handleStopServer(w http.ResponseWriter, r *http.Request) {
